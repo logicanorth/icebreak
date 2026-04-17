@@ -4,232 +4,102 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
-function LoginPageInner() {
-  const searchParams = useSearchParams();
+function LoginInner() {
   const [email, setEmail] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "sent" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    const err = searchParams.get("error");
-    if (err === "expired") {
-      setErrorMsg("That login link has expired or already been used. Enter your email to get a new one.");
+    if (searchParams.get("error") === "expired") {
       setStatus("error");
+      setErrorMsg("That login link has expired. Request a new one below.");
     }
   }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim()) return;
-
     setStatus("loading");
     setErrorMsg("");
-
     try {
       const res = await fetch("/api/auth/send-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim().toLowerCase() }),
+        body: JSON.stringify({ email: email.trim() }),
       });
       const data = await res.json();
-
       if (!res.ok) {
-        setErrorMsg(data.error ?? "Something went wrong. Please try again.");
+        setErrorMsg(data.error ?? "Something went wrong.");
         setStatus("error");
       } else {
-        setStatus("sent");
+        setStatus("success");
       }
     } catch {
-      setErrorMsg("Network error. Please check your connection and try again.");
+      setErrorMsg("Network error. Please try again.");
       setStatus("error");
     }
   };
 
   return (
-    <main style={{
-      minHeight: "100vh",
-      display: "flex",
-      flexDirection: "column",
-      background: "var(--bg)",
-    }}>
-      {/* Nav */}
-      <nav style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "18px 32px",
-        borderBottom: "1px solid var(--border)",
-      }}>
-        <Link href="/" style={{
-          fontWeight: 700,
-          fontSize: 18,
-          color: "var(--text)",
-          textDecoration: "none",
-          letterSpacing: "-0.02em",
-        }}>
+    <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px" }}>
+      <div className="card" style={{ width: "100%", maxWidth: 400 }}>
+        <Link href="/" style={{ fontSize: 18, fontWeight: 700, color: "var(--text)", textDecoration: "none", display: "block", marginBottom: 24 }}>
           icebreak
         </Link>
-      </nav>
 
-      {/* Card */}
-      <div style={{
-        flex: 1,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: "40px 24px",
-      }}>
-        <div style={{
-          width: "100%",
-          maxWidth: 420,
-          background: "var(--surface)",
-          border: "1px solid var(--border)",
-          borderRadius: 16,
-          padding: "40px 36px",
-        }}>
-          {status === "sent" ? (
-            <div style={{ textAlign: "center" }}>
-              <div style={{
-                width: 56,
-                height: 56,
-                borderRadius: "50%",
-                background: "color-mix(in oklab, var(--success) 15%, transparent)",
-                border: "1px solid color-mix(in oklab, var(--success) 30%, transparent)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                margin: "0 auto 24px",
-                fontSize: 24,
-              }}>
-                &#10003;
+        {status === "success" ? (
+          <div style={{ textAlign: "center", padding: "16px 0" }}>
+            <div style={{ fontSize: 32, marginBottom: 16 }}>📬</div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Check your email</h2>
+            <p style={{ fontSize: 14, color: "var(--muted)", lineHeight: 1.6 }}>
+              We sent a login link to <strong style={{ color: "var(--text)" }}>{email}</strong>. Click it to sign in.
+            </p>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 12 }}>
+              Link expires in 15 minutes.
+            </p>
+          </div>
+        ) : (
+          <>
+            <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Sign in to Icebreak</h1>
+            <p style={{ fontSize: 14, color: "var(--muted)", marginBottom: 24, lineHeight: 1.6 }}>
+              Enter your email and we will send you a magic login link.
+            </p>
+
+            <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label className="label">Email address</label>
+                <input
+                  type="email"
+                  className="input"
+                  placeholder="you@company.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                />
               </div>
-              <h1 style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: "var(--text)",
-                marginBottom: 12,
-                letterSpacing: "-0.03em",
-              }}>
-                Check your email
-              </h1>
-              <p style={{
-                fontSize: 14,
-                color: "var(--muted)",
-                lineHeight: 1.6,
-                marginBottom: 28,
-              }}>
-                We sent a login link to <strong style={{ color: "var(--text)" }}>{email}</strong>. Click it to access your Pro account. The link expires in 15 minutes.
-              </p>
-              <button
-                onClick={() => { setStatus("idle"); setEmail(""); }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--accent)",
-                  fontSize: 14,
-                  cursor: "pointer",
-                  textDecoration: "underline",
-                }}
-              >
-                Use a different email
-              </button>
-            </div>
-          ) : (
-            <>
-              <h1 style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: "var(--text)",
-                marginBottom: 8,
-                letterSpacing: "-0.03em",
-              }}>
-                Pro login
-              </h1>
-              <p style={{
-                fontSize: 14,
-                color: "var(--muted)",
-                marginBottom: 28,
-                lineHeight: 1.6,
-              }}>
-                Enter the email you used to subscribe. We'll send you a magic link to log in.
-              </p>
 
               {status === "error" && errorMsg && (
-                <div style={{
-                  background: "color-mix(in oklab, #ef4444 12%, transparent)",
-                  border: "1px solid color-mix(in oklab, #ef4444 30%, transparent)",
-                  borderRadius: 8,
-                  padding: "12px 14px",
-                  fontSize: 13,
-                  color: "#fca5a5",
-                  marginBottom: 20,
-                  lineHeight: 1.5,
-                }}>
+                <div style={{ fontSize: 13, color: "#fca5a5", background: "color-mix(in oklab, #ef4444 12%, transparent)", border: "1px solid color-mix(in oklab, #ef4444 30%, transparent)", borderRadius: 8, padding: "10px 14px" }}>
                   {errorMsg}
                 </div>
               )}
 
-              <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                <div>
-                  <label className="label">Email address</label>
-                  <input
-                    className="input"
-                    type="email"
-                    placeholder="you@company.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoFocus
-                    disabled={status === "loading"}
-                  />
-                </div>
+              <button type="submit" className="btn-primary" disabled={status === "loading"} style={{ width: "100%", justifyContent: "center" }}>
+                {status === "loading" ? "Sending..." : "Send login link"}
+              </button>
+            </form>
 
-                <button
-                  type="submit"
-                  className="btn-primary"
-                  disabled={status === "loading" || !email.trim()}
-                  style={{ justifyContent: "center" }}
-                >
-                  {status === "loading" ? (
-                    <>
-                      <span style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: "50%",
-                        border: "2px solid rgba(255,255,255,0.3)",
-                        borderTopColor: "#fff",
-                        animation: "spin 0.7s linear infinite",
-                        display: "inline-block",
-                      }} />
-                      Sending...
-                    </>
-                  ) : (
-                    "Send login link"
-                  )}
-                </button>
-              </form>
-
-              <p style={{
-                textAlign: "center",
-                marginTop: 24,
-                fontSize: 13,
-                color: "var(--muted)",
-              }}>
-                Don't have a Pro account?{" "}
-                <Link href="/#pricing" style={{ color: "var(--accent)", textDecoration: "none" }}>
-                  View pricing
-                </Link>
-              </p>
-            </>
-          )}
-        </div>
+            <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 20, textAlign: "center" }}>
+              Don't have Pro?{" "}
+              <Link href="/#pricing" style={{ color: "var(--accent)", textDecoration: "none" }}>
+                Get started for $29/mo
+              </Link>
+            </p>
+          </>
+        )}
       </div>
-
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </main>
   );
 }
@@ -237,7 +107,7 @@ function LoginPageInner() {
 export default function LoginPage() {
   return (
     <Suspense>
-      <LoginPageInner />
+      <LoginInner />
     </Suspense>
   );
 }
