@@ -27,6 +27,10 @@ export async function GET() {
     const res = await fetch(url, { headers: headers() });
     if (!res.ok) {
       const text = await res.text();
+      // If table doesn't exist, return empty rather than error
+      if (text.includes("PGRST205") || text.includes("relation")) {
+        return NextResponse.json({ requests: [], setup_needed: true });
+      }
       console.error("feature_requests GET error:", text);
       return NextResponse.json({ requests: [] });
     }
@@ -69,6 +73,9 @@ export async function POST(req: NextRequest) {
     });
     if (!res.ok) {
       const text = await res.text();
+      if (text.includes("PGRST205") || text.includes("relation")) {
+        return NextResponse.json({ error: "Feature requests are not yet set up. An admin needs to run the database migration." }, { status: 503 });
+      }
       console.error("feature_requests POST error:", text);
       return NextResponse.json({ error: "Failed to save request." }, { status: 500 });
     }
