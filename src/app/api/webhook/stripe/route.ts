@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import crypto from "crypto";
 import { upsertUser, updateSubscriptionStatus, createMagicToken } from "@/lib/supabase";
 import { sendMagicLink } from "@/lib/email";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2026-03-25.dahlia",
-});
 
 function verifyStripeSignature(rawBody: string, signature: string, secret: string): boolean {
   try {
