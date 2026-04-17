@@ -16,20 +16,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }
 
-  // Get or create user — free users can always get a magic link
-  let user = await getUser(email);
-  if (!user) {
-    user = await upsertUser(email, null, null, "free");
+  try {
+    // Get or create user — free users can always get a magic link
+    let user = await getUser(email);
+    if (!user) {
+      user = await upsertUser(email, null, null, "free");
+    }
+
+    // Generate token and send magic link
+    const rawToken = crypto.randomBytes(32).toString("hex");
+    await createMagicToken(user.id, rawToken);
+
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://icebreakemail.com";
+    const magicUrl = `${baseUrl}/auth/callback?token=${rawToken}`;
+
+    await sendMagicLink(email, magicUrl);
+
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("send-link error:", msg);
+    return NextResponse.json({ error: "Failed to send login link.", detail: msg }, { status: 500 });
   }
-
-  // Generate token and send magic link
-  const rawToken = crypto.randomBytes(32).toString("hex");
-  await createMagicToken(user.id, rawToken);
-
-  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://icebreakemail.com";
-  const magicUrl = `${baseUrl}/auth/callback?token=${rawToken}`;
-
-  await sendMagicLink(email, magicUrl);
-
-  return NextResponse.json({ ok: true });
 }
