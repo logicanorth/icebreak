@@ -3,8 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Icebreak — AI Cold Email Personalizer",
-  description:
-    "Paste a company URL + your offer. Get a personalized cold email in 10 seconds. Free for 5/day.",
+  description: "Paste a company URL + your offer. Get a personalized cold email in 10 seconds. Free for 5/day.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
@@ -13,8 +12,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: "Icebreak — Personalized cold emails in 10 seconds",
-    description:
-      "Clay charges $495/month. We don't. Paste a URL, get a hyper-personalized cold email instantly.",
+    description: "Clay charges $495/month. We don't. Paste a URL, get a hyper-personalized cold email instantly.",
     type: "website",
   },
   twitter: {
@@ -30,11 +28,7 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>

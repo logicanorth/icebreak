@@ -1,14 +1,28 @@
 "use client";
-
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
-interface FormData {
-  prospectName: string;
-  prospectTitle: string;
-  companyUrl: string;
-  yourOffer: string;
-  tone: "professional" | "casual" | "direct";
+const FREE_LIMIT = 5;
+const STORAGE_KEY = "icebreak_usage";
+
+function track(event: string, props?: Record<string, string | number | boolean>) {
+  try {
+    navigator.sendBeacon("/api/analytics", JSON.stringify({ event, ...props, ts: Date.now() }));
+  } catch {
+    // Never block on analytics failure
+  }
+}
+
+async function redirectToCheckout() {
+  const res = await fetch("/api/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+  const data = await res.json();
+  if (data.url) window.location.href = data.url;
+}
+
+interface Usage {
+  date: string;
+  count: number;
 }
 
 interface EmailResult {
@@ -17,53 +31,99 @@ interface EmailResult {
   openingLineNote: string;
 }
 
-function getUsage() {
-  if (typeof window === "undefined") return { date: new Date().toISOString().split("T")[0], count: 0 };
+function getTodayKey() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getUsage(): Usage {
+  if (typeof window === "undefined") return { date: getTodayKey(), count: 0 };
   try {
-    const stored = localStorage.getItem("icebreak_usage");
-    if (stored) {
-      const parsed = JSON.parse(stored);
-      const today = new Date().toISOString().split("T")[0];
-      if (parsed.date === today) return parsed;
-    }
-  } catch {}
-  return { date: new Date().toISOString().split("T")[0], count: 0 };
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return { date: getTodayKey(), count: 0 };
+    const parsed: Usage = JSON.parse(raw);
+    if (parsed.date !== getTodayKey()) return { date: getTodayKey(), count: 0 };
+    return parsed;
+  } catch {
+    return { date: getTodayKey(), count: 0 };
+  }
 }
 
 function incrementUsage() {
   const usage = getUsage();
-  const updated = { ...usage, count: usage.count + 1 };
-  localStorage.setItem("icebreak_usage", JSON.stringify(updated));
-  return updated;
+  const next = { ...usage, count: usage.count + 1 };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+  return next;
 }
 
-export default function ToolPage() {
-  const [form, setForm] = useState<FormData>({
+function ToolPageInner() {
+  const [form, setForm] = useState({
     prospectName: "",
     prospectTitle: "",
     companyUrl: "",
     yourOffer: "",
-    tone: "professional",
+    tone: "professional" as "professional" | "casual" | "direct",
   });
   const [loading, setLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
   const [result, setResult] = useState<EmailResult | null>(null);
   const [error, setError] = useState("");
   const [usageCount, setUsageCount] = useState(0);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [isPro, setIsPro] = useState(false);
+  const [proEmail, setProEmail] = useState<string | null>(null);
+  const [proLoaded, setProLoaded] = useState(false);
+  const [copied, setCopied] = useState<"subject" | "body" | "all" | null>(null);
+  const paywallTracked = useRef(false);
+  const searchParams = useSearchParams();
 
   useEffect(() => {
-    setUsageCount(getUsage().count);
-  }, []);
+    // Fetch real Pro status from the server
+    fetch("/api/pro/status")
+      .then((r) => r.json())
+      .then((d) => {
+        setIsPro(d.isPro ?? false);
+        setProEmail(d.email ?? null);
+        setProLoaded(true);
+      })
+      .catch(() => setProLoaded(true));
 
-  const remaining = 5 - usageCount;
-  const limitReached = remaining <= 0;
+    setUsageCount(getUsage().count);
+  }, [searchParams]);
+
+  const handleUpgrade = async () => {
+    track("upgrade_click", { source: "tool" });
+    setCheckoutLoading(true);
+    await redirectToCheckout().finally(() => setCheckoutLoading(false));
+  };
+
+  const handlePortal = async () => {
+    setPortalLoading(true);
+    try {
+      const res = await fetch("/api/portal", { method: "POST" });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+    } finally {
+      setPortalLoading(false);
+    }
+  };
+
+  const remaining = FREE_LIMIT - usageCount;
+  const isLimitReached = !isPro && remaining <= 0;
+
+  // Track paywall_view once when limit is reached
+  useEffect(() => {
+    if (isLimitReached && proLoaded && !paywallTracked.current) {
+      paywallTracked.current = true;
+      track("paywall_view", { source: "tool" });
+    }
+  }, [isLimitReached, proLoaded]);
 
   const handleGenerate = async () => {
     if (!form.prospectName || !form.companyUrl || !form.yourOffer) {
       setError("Please fill in name, company URL, and your offer.");
       return;
     }
-    if (limitReached) return;
+    if (isLimitReached) return;
 
     setLoading(true);
     setError("");
@@ -78,8 +138,10 @@ export default function ToolPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setResult(data);
-      const updated = incrementUsage();
-      setUsageCount(updated.count);
+      if (!isPro) {
+        const updated = incrementUsage();
+        setUsageCount(updated.count);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -87,68 +149,77 @@ export default function ToolPage() {
     }
   };
 
-  const handleCopy = async (part: "subject" | "body" | "all") => {
+  const copy = async (type: "subject" | "body" | "all") => {
     if (!result) return;
-    const text =
-      part === "subject"
-        ? result.subject
-        : part === "body"
-        ? result.body
-        : `Subject: ${result.subject}\n\n${result.body}`;
+    let text = "";
+    if (type === "subject") text = result.subject;
+    else if (type === "body") text = result.body;
+    else text = `Subject: ${result.subject}\n\n${result.body}`;
     await navigator.clipboard.writeText(text);
-    setCopied(part);
+    setCopied(type);
     setTimeout(() => setCopied(null), 1800);
   };
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      <nav
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 24px",
-          borderBottom: "1px solid var(--border)",
-          background: "var(--bg)",
-        }}
-      >
+      {/* Nav */}
+      <nav style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        padding: "14px 24px", borderBottom: "1px solid var(--border)",
+        background: "var(--bg)"
+      }}>
         <Link href="/" style={{ fontWeight: 700, fontSize: 17, color: "var(--text)", textDecoration: "none" }}>
           icebreak
         </Link>
         <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-          <span style={{ fontSize: 13, color: remaining <= 1 ? "#f59e0b" : "var(--muted)" }}>
-            {limitReached ? "Daily limit reached" : `${remaining} free email${remaining !== 1 ? "s" : ""} left today`}
-          </span>
-          <Link
-            href="/?upgrade=1#pricing"
-            style={{
-              background: "var(--accent)",
-              color: "#fff",
-              padding: "7px 16px",
-              borderRadius: 7,
-              fontSize: 13,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
-          >
-            Upgrade — $29/mo
-          </Link>
+          {proLoaded && (
+            <>
+              <span style={{ fontSize: 13, color: remaining <= 1 && !isPro ? "#f59e0b" : "var(--muted)" }}>
+                {isPro ? "Pro — unlimited" : isLimitReached ? "Daily limit reached" : `${remaining} free email${remaining !== 1 ? "s" : ""} left today`}
+              </span>
+              {isPro && (
+                <>
+                  <Link
+                    href="/tool/bulk"
+                    style={{
+                      fontSize: 13, color: "var(--muted)", textDecoration: "none",
+                      padding: "7px 14px", border: "1px solid var(--border)",
+                      borderRadius: 7, fontWeight: 500,
+                    }}
+                  >
+                    Bulk
+                  </Link>
+                  <button
+                    onClick={handlePortal}
+                    disabled={portalLoading}
+                    style={{
+                      background: "var(--surface)", border: "1px solid var(--border)",
+                      borderRadius: 7, padding: "7px 14px", fontSize: 13, fontWeight: 500,
+                      color: "var(--text)", cursor: "pointer"
+                    }}
+                  >
+                    {portalLoading ? "..." : "My account"}
+                  </button>
+                </>
+              )}
+              {!isPro && (
+                <button onClick={handleUpgrade} disabled={checkoutLoading} style={{
+                  background: "var(--accent)", color: "#fff", padding: "7px 16px",
+                  borderRadius: 7, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer"
+                }}>
+                  {checkoutLoading ? "..." : "Upgrade — $29/mo"}
+                </button>
+              )}
+            </>
+          )}
         </div>
       </nav>
 
-      <div
-        style={{
-          flex: 1,
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 0,
-          maxWidth: 1200,
-          margin: "0 auto",
-          width: "100%",
-          padding: "32px 24px",
-        }}
-      >
-        {/* Left: Form */}
+      <div style={{
+        flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr",
+        gap: 0, maxWidth: 1200, margin: "0 auto", width: "100%", padding: "32px 24px"
+      }}>
+        {/* Left: Input */}
         <div style={{ paddingRight: 32 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 6, letterSpacing: "-0.02em" }}>
             Generate cold email
@@ -206,62 +277,49 @@ export default function ToolPage() {
             <div>
               <label className="label">Tone</label>
               <div style={{ display: "flex", gap: 8 }}>
-                {(["professional", "casual", "direct"] as const).map((tone) => (
+                {(["professional", "casual", "direct"] as const).map((t) => (
                   <button
-                    key={tone}
-                    onClick={() => setForm({ ...form, tone })}
+                    key={t}
+                    onClick={() => setForm({ ...form, tone: t })}
                     style={{
-                      padding: "8px 16px",
-                      borderRadius: 7,
-                      fontSize: 13,
-                      fontWeight: 500,
-                      border: form.tone === tone ? "1px solid var(--accent)" : "1px solid var(--border)",
-                      background:
-                        form.tone === tone
-                          ? "color-mix(in oklab, var(--accent) 15%, transparent)"
-                          : "var(--surface)",
-                      color: form.tone === tone ? "#a5b4fc" : "var(--muted)",
+                      padding: "8px 16px", borderRadius: 7, fontSize: 13, fontWeight: 500,
+                      border: form.tone === t ? "1px solid var(--accent)" : "1px solid var(--border)",
+                      background: form.tone === t
+                        ? "color-mix(in oklab, var(--accent) 15%, transparent)"
+                        : "var(--surface)",
+                      color: form.tone === t ? "#a5b4fc" : "var(--muted)",
                       cursor: "pointer",
                       textTransform: "capitalize",
                     }}
                   >
-                    {tone}
+                    {t}
                   </button>
                 ))}
               </div>
             </div>
 
             {error && (
-              <div
-                style={{
-                  background: "color-mix(in oklab, #ef4444 12%, transparent)",
-                  border: "1px solid color-mix(in oklab, #ef4444 30%, transparent)",
-                  borderRadius: 8,
-                  padding: "10px 14px",
-                  fontSize: 13,
-                  color: "#fca5a5",
-                }}
-              >
+              <div style={{
+                background: "color-mix(in oklab, #ef4444 12%, transparent)",
+                border: "1px solid color-mix(in oklab, #ef4444 30%, transparent)",
+                borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#fca5a5"
+              }}>
                 {error}
               </div>
             )}
 
-            {limitReached ? (
-              <div
-                style={{
-                  background: "color-mix(in oklab, #f59e0b 10%, transparent)",
-                  border: "1px solid color-mix(in oklab, #f59e0b 25%, transparent)",
-                  borderRadius: 8,
-                  padding: "16px",
-                  textAlign: "center",
-                }}
-              >
+            {isLimitReached ? (
+              <div style={{
+                background: "color-mix(in oklab, #f59e0b 10%, transparent)",
+                border: "1px solid color-mix(in oklab, #f59e0b 25%, transparent)",
+                borderRadius: 8, padding: "16px", textAlign: "center"
+              }}>
                 <p style={{ fontSize: 14, color: "#fcd34d", marginBottom: 12 }}>
                   You've used all 5 free emails for today.
                 </p>
-                <Link href="/?upgrade=1#pricing" className="btn-primary" style={{ textDecoration: "none" }}>
-                  Upgrade to Pro — $29/mo
-                </Link>
+                <button onClick={handleUpgrade} disabled={checkoutLoading} className="btn-primary">
+                  {checkoutLoading ? "Redirecting..." : "Upgrade to Pro — $29/mo"}
+                </button>
               </div>
             ) : (
               <button
@@ -272,17 +330,13 @@ export default function ToolPage() {
               >
                 {loading ? (
                   <>
-                    <span
-                      style={{
-                        width: 14,
-                        height: 14,
-                        borderRadius: "50%",
-                        border: "2px solid rgba(255,255,255,0.3)",
-                        borderTopColor: "#fff",
-                        animation: "spin 0.7s linear infinite",
-                        display: "inline-block",
-                      }}
-                    />
+                    <span style={{
+                      width: 14, height: 14, borderRadius: "50%",
+                      border: "2px solid rgba(255,255,255,0.3)",
+                      borderTopColor: "#fff",
+                      animation: "spin 0.7s linear infinite",
+                      display: "inline-block"
+                    }} />
                     Personalizing...
                   </>
                 ) : (
@@ -294,20 +348,16 @@ export default function ToolPage() {
         </div>
 
         {/* Right: Output */}
-        <div style={{ paddingLeft: 32, borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column" }}>
+        <div style={{
+          paddingLeft: 32, borderLeft: "1px solid var(--border)",
+          display: "flex", flexDirection: "column"
+        }}>
           {!result && !loading && (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "var(--muted)",
-                textAlign: "center",
-                gap: 12,
-              }}
-            >
+            <div style={{
+              flex: 1, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center",
+              color: "var(--muted)", textAlign: "center", gap: 12
+            }}>
               <div style={{ fontSize: 40 }}>✉</div>
               <p style={{ fontSize: 15, maxWidth: 280, lineHeight: 1.6 }}>
                 Your personalized email will appear here. Takes about 10 seconds.
@@ -316,26 +366,16 @@ export default function ToolPage() {
           )}
 
           {loading && (
-            <div
-              style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 16,
-              }}
-            >
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: "50%",
-                  border: "3px solid var(--border)",
-                  borderTopColor: "var(--accent)",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
+            <div style={{
+              flex: 1, display: "flex", flexDirection: "column",
+              alignItems: "center", justifyContent: "center", gap: 16
+            }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: "50%",
+                border: "3px solid var(--border)",
+                borderTopColor: "var(--accent)",
+                animation: "spin 0.8s linear infinite"
+              }} />
               <p style={{ fontSize: 14, color: "var(--muted)" }}>
                 Reading their website and writing your email...
               </p>
@@ -347,34 +387,28 @@ export default function ToolPage() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <h2 style={{ fontSize: 16, fontWeight: 700 }}>Your email</h2>
                 <button
-                  onClick={() => handleCopy("all")}
+                  onClick={() => copy("all")}
                   style={{
-                    background: "var(--surface)",
-                    border: "1px solid var(--border)",
-                    borderRadius: 7,
-                    padding: "7px 14px",
-                    fontSize: 13,
-                    fontWeight: 500,
+                    background: "var(--surface)", border: "1px solid var(--border)",
+                    borderRadius: 7, padding: "7px 14px", fontSize: 13, fontWeight: 500,
                     color: copied === "all" ? "var(--success)" : "var(--text)",
-                    cursor: "pointer",
+                    cursor: "pointer"
                   }}
                 >
                   {copied === "all" ? "Copied!" : "Copy all"}
                 </button>
               </div>
 
+              {/* Subject */}
               <div className="card" style={{ padding: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
                   <span className="label" style={{ margin: 0 }}>Subject line</span>
                   <button
-                    onClick={() => handleCopy("subject")}
+                    onClick={() => copy("subject")}
                     style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 12,
-                      color: copied === "subject" ? "var(--success)" : "var(--muted)",
-                      padding: "0 4px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontSize: 12, color: copied === "subject" ? "var(--success)" : "var(--muted)",
+                      padding: "0 4px"
                     }}
                   >
                     {copied === "subject" ? "Copied" : "Copy"}
@@ -383,36 +417,35 @@ export default function ToolPage() {
                 <p style={{ fontSize: 15, fontWeight: 600, color: "var(--text)" }}>{result.subject}</p>
               </div>
 
+              {/* Body */}
               <div className="card" style={{ padding: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                   <span className="label" style={{ margin: 0 }}>Email body</span>
                   <button
-                    onClick={() => handleCopy("body")}
+                    onClick={() => copy("body")}
                     style={{
-                      background: "none",
-                      border: "none",
-                      cursor: "pointer",
-                      fontSize: 12,
-                      color: copied === "body" ? "var(--success)" : "var(--muted)",
-                      padding: "0 4px",
+                      background: "none", border: "none", cursor: "pointer",
+                      fontSize: 12, color: copied === "body" ? "var(--success)" : "var(--muted)",
+                      padding: "0 4px"
                     }}
                   >
                     {copied === "body" ? "Copied" : "Copy"}
                   </button>
                 </div>
-                <p style={{ fontSize: 14, color: "var(--text)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+                <p style={{
+                  fontSize: 14, color: "var(--text)", lineHeight: 1.7,
+                  whiteSpace: "pre-wrap"
+                }}>
                   {result.body}
                 </p>
               </div>
 
-              <div
-                style={{
-                  background: "color-mix(in oklab, var(--accent) 8%, transparent)",
-                  border: "1px solid color-mix(in oklab, var(--accent) 20%, transparent)",
-                  borderRadius: 8,
-                  padding: "12px 16px",
-                }}
-              >
+              {/* Why this works */}
+              <div style={{
+                background: "color-mix(in oklab, var(--accent) 8%, transparent)",
+                border: "1px solid color-mix(in oklab, var(--accent) 20%, transparent)",
+                borderRadius: 8, padding: "12px 16px"
+              }}>
                 <span style={{ fontSize: 12, color: "#a5b4fc", fontWeight: 600 }}>WHY THIS OPENER WORKS</span>
                 <p style={{ fontSize: 13, color: "var(--muted)", marginTop: 6, lineHeight: 1.6 }}>
                   {result.openingLineNote}
@@ -421,17 +454,11 @@ export default function ToolPage() {
 
               <button
                 onClick={handleGenerate}
-                disabled={loading || limitReached}
+                disabled={loading || isLimitReached}
                 style={{
-                  background: "var(--surface)",
-                  border: "1px solid var(--border)",
-                  borderRadius: 8,
-                  padding: "11px 0",
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: "var(--muted)",
-                  cursor: "pointer",
-                  width: "100%",
+                  background: "var(--surface)", border: "1px solid var(--border)",
+                  borderRadius: 8, padding: "11px 0", fontSize: 14, fontWeight: 500,
+                  color: "var(--muted)", cursor: "pointer", width: "100%"
                 }}
               >
                 Regenerate
@@ -447,5 +474,13 @@ export default function ToolPage() {
         }
       `}</style>
     </main>
+  );
+}
+
+export default function ToolPage() {
+  return (
+    <Suspense>
+      <ToolPageInner />
+    </Suspense>
   );
 }

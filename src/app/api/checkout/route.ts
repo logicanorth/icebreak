@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2025-03-31.basil",
+  apiVersion: "2026-03-25.dahlia",
 });
 
 export async function POST(req: NextRequest) {
@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const { email } = body;
 
-    const origin = req.headers.get("origin") || "https://icebreak.vercel.app";
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "https://icebreakemail.com";
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
@@ -30,8 +30,8 @@ export async function POST(req: NextRequest) {
         },
       ],
       customer_email: email || undefined,
-      success_url: `${origin}/tool?upgraded=1`,
-      cancel_url: `${origin}/#pricing`,
+      success_url: `${baseUrl}/checkout/success`,
+      cancel_url: `${baseUrl}/#pricing`,
       metadata: { product: "icebreak_pro" },
     });
 
