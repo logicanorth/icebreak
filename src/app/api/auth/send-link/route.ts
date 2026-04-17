@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { getUser, createMagicToken } from "@/lib/supabase";
+import { getUser, upsertUser, createMagicToken } from "@/lib/supabase";
 import { sendMagicLink } from "@/lib/email";
 
 export async function POST(req: NextRequest) {
@@ -16,13 +16,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A valid email is required." }, { status: 400 });
   }
 
-  const user = await getUser(email);
-
-  if (!user || user.subscription_status !== "active") {
-    return NextResponse.json(
-      { error: "No active Pro subscription for this email." },
-      { status: 403 }
-    );
+  // Get or create user — free users can always get a magic link
+  let user = await getUser(email);
+  if (!user) {
+    user = await upsertUser(email, null, null, "free");
   }
 
   // Generate token and send magic link
