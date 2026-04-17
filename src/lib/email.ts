@@ -86,7 +86,7 @@ export async function sendMagicLink(to: string, magicUrl: string): Promise<void>
       Authorization: `Bearer ${RESEND_API_KEY}`,
     },
     body: JSON.stringify({
-      from: "Icebreak <hello@icebreakemail.com>",
+      from: "Icebreak <onboarding@resend.dev>",
       to: [to],
       subject: "Your Icebreak Pro login link",
       html,
