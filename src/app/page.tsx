@@ -130,6 +130,7 @@ export default function LandingPage() {
         </span>
         <div style={{ display: "flex", gap: 24, alignItems: "center" }}>
           <a href="#pricing" style={{ color: "var(--muted)", fontSize: 14, textDecoration: "none" }}>Pricing</a>
+          <Link href="/login" style={{ color: "var(--muted)", fontSize: 14, textDecoration: "none", fontWeight: 500 }}>Sign in</Link>
           <Link href="/tool" style={{
             background: "var(--accent)", color: "#fff", padding: "8px 18px",
             borderRadius: 8, fontSize: 14, fontWeight: 600, textDecoration: "none"

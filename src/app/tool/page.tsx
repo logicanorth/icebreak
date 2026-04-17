@@ -203,12 +203,17 @@ function ToolPageInner() {
                 </>
               )}
               {!isPro && (
-                <button onClick={handleUpgrade} disabled={checkoutLoading} style={{
-                  background: "var(--accent)", color: "#fff", padding: "7px 16px",
-                  borderRadius: 7, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer"
-                }}>
-                  {checkoutLoading ? "..." : "Upgrade — $29/mo"}
-                </button>
+                <>
+                  <Link href="/login" style={{ fontSize: 13, color: "var(--muted)", textDecoration: "none", fontWeight: 500 }}>
+                    Sign in
+                  </Link>
+                  <button onClick={handleUpgrade} disabled={checkoutLoading} style={{
+                    background: "var(--accent)", color: "#fff", padding: "7px 16px",
+                    borderRadius: 7, fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer"
+                  }}>
+                    {checkoutLoading ? "..." : "Upgrade — $29/mo"}
+                  </button>
+                </>
               )}
             </>
           )}
